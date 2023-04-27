@@ -456,12 +456,11 @@ def generate(model, idx, max_new_tokens, temperature=1.0, do_sample=False, top_k
 
     return idx
 
-def print_samples(num=10):
+def print_samples(model, train_dataset, test_dataset, num=10):
     """ samples from the model and pretty prints the decoded samples """
-    X_init = torch.zeros(num, 1, dtype=torch.long).to(args.device)
-    top_k = args.top_k if args.top_k != -1 else None
+    X_init = torch.zeros(num, 1, dtype=torch.long).to("cuda")
     steps = train_dataset.get_output_length() - 1 # -1 because we already start with <START> token (index 0)
-    X_samp = generate(model, X_init, steps, top_k=top_k, do_sample=True).to('cpu')
+    X_samp = generate(model, X_init, steps, top_k=None, do_sample=True).to('cpu')
     train_samples, test_samples, new_samples = [], [], []
     for i in range(X_samp.size(0)):
         # get the i'th row of sampled integers, as python list
@@ -490,7 +489,7 @@ def evaluate(model, dataset, batch_size=50, max_batches=None):
     loader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=0)
     losses = []
     for i, batch in enumerate(loader):
-        batch = [t.to(args.device) for t in batch]
+        batch = [t.to("cuda") for t in batch]
         X, Y = batch
         logits, loss = model(X, Y)
         losses.append(loss.item())
@@ -573,6 +572,10 @@ def create_datasets_from_words(words):
 
     return train_dataset, test_dataset
 
+def generate_datasets(f):
+    words = [f() for _ in range(10000)]
+    return create_datasets_from_words(words)
+
 class InfiniteDataLoader:
     """
     this is really hacky and I'm not proud of it, but there doesn't seem to be
@@ -594,6 +597,8 @@ class InfiniteDataLoader:
 
 # -----------------------------------------------------------------------------
 if __name__ == '__main__':
+    if True:
+        raise Exception("this completely won't work any more")
 
     # parse command line args
     parser = argparse.ArgumentParser(description="Make More")
