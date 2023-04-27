@@ -27,6 +27,8 @@ from torch.utils.data import Dataset
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
+import matplotlib.pyplot as plt
+
 # -----------------------------------------------------------------------------
 
 @dataclass
@@ -74,7 +76,7 @@ class CausalSelfAttention(nn.Module):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q, k ,v  = self.c_attn(x).split(self.n_embd, dim=2)
+        q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
@@ -88,6 +90,12 @@ class CausalSelfAttention(nn.Module):
 
         # output projection
         y = self.c_proj(y)
+
+        # Store things for later inspection
+        self.last_k = k
+        self.last_q = q
+        self.last_attention = att
+        
         return y
 
 class Block(nn.Module):
@@ -107,7 +115,8 @@ class Block(nn.Module):
         self.mlpf = lambda x: m.c_proj(m.act(m.c_fc(x))) # MLP forward
 
     def forward(self, x):
-        x = x + self.attn(self.ln_1(x))
+        self.last_ln_1 = self.ln_1(x)
+        x = x + self.attn(self.last_ln_1)
         x = x + self.mlpf(self.ln_2(x))
         return x
 
@@ -438,6 +447,9 @@ def generate(model, idx, max_new_tokens, temperature=1.0, do_sample=False, top_k
         idx_cond = idx if idx.size(1) <= block_size else idx[:, -block_size:]
         # forward the model to get the logits for the index in the sequence
         logits, _ = model(idx_cond)
+        if idx_cond.shape[0] == 1:
+              print("model input:", idx_cond)
+              show_data(model)
         # pluck the logits at the final step and scale by desired temperature
         logits = logits[:, -1, :] / temperature
         # optionally crop the logits to only the top k options
@@ -483,6 +495,23 @@ def print_samples(model, train_dataset, test_dataset, num=10):
             print(word)
     print('-'*80)
 
+def show_data(model):
+    block = model.transformer.h[0]
+    print("first layer norm output:")
+    plt.imshow(block.last_ln_1[0, :, :].cpu())
+    plt.show()
+    
+    attn = block.attn
+    print("attention:")
+    plt.imshow(attn.last_attention[0, 0, :, :].cpu())
+    plt.show()
+    print("keys:")
+    plt.imshow(attn.last_k[0, 0, :, :].cpu())
+    plt.show()
+    print("queries:")
+    plt.imshow(attn.last_q[0, 0, :, :].cpu())
+    plt.show()
+
 @torch.inference_mode()
 def evaluate(model, dataset, batch_size=50, max_batches=None):
     model.eval()
@@ -508,7 +537,7 @@ class CharDataset(Dataset):
         self.words = words
         self.chars = chars
         self.max_word_length = max_word_length
-        self.stoi = {ch:i+1 for i,ch in enumerate(chars)}
+        self.stoi = {ch:i+1 for i,ch in enumerate(sorted(chars))}
         self.itos = {i:s for s,i in self.stoi.items()} # inverse mapping
 
     def __len__(self):
@@ -573,7 +602,7 @@ def create_datasets_from_words(words):
     return train_dataset, test_dataset
 
 def generate_datasets(f):
-    words = [f() for _ in range(10000)]
+    words = [f() for _ in range(100000)]
     return create_datasets_from_words(words)
 
 class InfiniteDataLoader:
